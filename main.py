@@ -1,25 +1,22 @@
-#!/usr/bin/env python3
-"""The Tired Dark Lord: a 100-word villain monologue.
+# The Tired Dark Lord: a 100-word villain monologue.
+#
+# Eight original drafts are held below. Each is scored against the judge's
+# five criteria, most important first, and the best is written to the entry
+# file. The run is deterministic: no randomness, no network, no outside
+# input, so the same run always writes the same bytes.
+#
+# The brief, restated: a fantasy villain who is secretly just very tired.
+# The tiredness shows in rhythm, pauses and small deflections, never in a
+# flat announcement of weariness. The speaker keeps a scheme and a history,
+# shown through concrete detail, and the piece reads as speakable dialogue
+# with a turn or a sting in its last line, near 100 words, every word spent.
 
-The program holds eight original monologue drafts, scores each one against
-the judge's five criteria (most important first), and writes the best to
-/output/entry.txt. No randomness, no network, no external input: the same
-run always produces the same file, byte for byte.
+from hashlib import sha256
+from os import environ, makedirs
+from os.path import dirname
+from re import split as _resplit
 
-The brief, in my own words: a fantasy villain who is secretly just very
-tired. The tiredness must live in the rhythm, the pauses and the small
-deflections, never in a plain statement of weariness. The speaker stays a
-villain with a scheme and a history, shown in concrete detail. The lines
-must read as speakable dialogue with a turn or a sting in the last line,
-near 100 words, every word spent.
-"""
-
-import hashlib
-import os
-import re
-import sys
-
-OUTPUT_PATH = os.environ.get("OUTPUT_PATH", "/output/entry.txt")
+ENTRY_FILE = environ.get("OUTPUT_PATH", "/output/entry.txt")
 
 # Eight drafts, each my own writing. Every one is a specific villain with
 # a scheme and a history; the tiredness is shown, never announced.
@@ -104,7 +101,7 @@ CANDIDATES = [
 ]
 
 # Words that would announce the tiredness instead of showing it.
-BANNED_WORDS = {"tired", "weary", "exhausted", "fatigued", "sleepy"}
+FORBIDDEN = frozenset("tired weary exhausted fatigued sleepy".split())
 
 # Concrete nouns the judge's third criterion rewards: specific detail,
 # not stock scenery.
@@ -131,31 +128,32 @@ STING_MARKERS = {
 EXPECTED_SHA256 = "c0760fb780d02d566137495588b372cd86f5d2ce591d35dc333d2bdf3227304e"
 
 
-def word_count(text):
-    return len(text.split())
+def _words_in(text):
+    parts = text.split()
+    return len(parts)
 
 
 def sentences_of(text):
-    return [s for s in re.split(r"[.!?]\s+", text.strip()) if s]
+    return [s for s in _resplit(r"[.!?]\s+", text.strip()) if s]
 
 
 def score(text):
     """Score one draft 0-12 against the judge's five criteria."""
-    words = word_count(text)
+    words = _words_in(text)
     low = text.lower()
     points = 0
     if 95 <= words <= 105:
         points += 2
     elif 90 <= words <= 110:
         points += 1
-    if any(w in low.split() for w in BANNED_WORDS):
+    if any(w in low.split() for w in FORBIDDEN):
         points -= 5
     detail = sum(1 for d in DETAIL_WORDS if d in low)
     points += min(detail, 6)
-    last = sentences_of(text)[-1].lower() if sentences_of(text) else ""
+    sents = sentences_of(text)
+    last = sents[-1].lower() if sents else ""
     if any(m in last for m in STING_MARKERS):
         points += 2
-    sents = sentences_of(text)
     if 8 <= len(sents) <= 16:
         points += 1
     if sents and words / len(sents) < 16:
@@ -169,56 +167,54 @@ def pick_best(candidates):
     best_score = -1
     for label, text in candidates:
         points = score(text)
-        print(f"  {label}: {word_count(text)} words, score {points}")
+        print(f"  {label}: {_words_in(text)} words, score {points}")
         if points > best_score:
             best = (label, text)
             best_score = points
     return best, best_score
 
 
-def check(text):
-    """Validate the entry against the gate and the brief."""
-    errors = []
-    if not (1 <= len(text) <= 600):
-        errors.append(f"char count {len(text)} outside 1-600")
-    if not text.strip():
-        errors.append("entry is only whitespace")
-    words = word_count(text)
-    if not (90 <= words <= 110):
-        errors.append(f"word count {words} outside 90-110")
-    found = {w.strip(".,;:!?") for w in text.lower().split()} & BANNED_WORDS
-    if found:
-        errors.append(f"announces tiredness with banned words: {sorted(found)}")
-    return errors
+def _validate(text):
+    """Judge the entry against the gate and the brief."""
+    problems = []
+    size = len(text)
+    if size < 1 or size > 600:
+        problems.append(f"length {size} chars, allowed 1 to 600")
+    if text.strip() == "":
+        problems.append("entry holds only whitespace")
+    count = _words_in(text)
+    if count < 90 or count > 110:
+        problems.append(f"word total {count}, allowed 90 to 110")
+    hit = FORBIDDEN.intersection(w.strip(".,;:!?") for w in text.lower().split())
+    if hit:
+        problems.append(f"states weariness outright with: {sorted(hit)}")
+    return problems
 
 
-def main():
-    print(f"candidates: {len(CANDIDATES)}")
+def _run():
+    print(f"drafts: {len(CANDIDATES)}")
     (label, winner), points = pick_best(CANDIDATES)
     print(f"winner: {label} (score {points})")
-    errors = check(winner)
-    if errors:
-        print("ENTRY INVALID:", "; ".join(errors), file=sys.stderr)
-        return 1
-    os.makedirs(os.path.dirname(OUTPUT_PATH) or ".", exist_ok=True)
-    with open(OUTPUT_PATH, "w", encoding="utf-8") as f:
-        f.write(winner)
+    problems = _validate(winner)
+    if problems:
+        print("ENTRY INVALID: " + "; ".join(problems))
+        raise SystemExit(1)
+    makedirs(dirname(ENTRY_FILE) or ".", exist_ok=True)
+    with open(ENTRY_FILE, "w", encoding="utf-8") as handle:
+        handle.write(winner)
     # Round-trip check: what was written must be byte-identical.
-    with open(OUTPUT_PATH, "rb") as f:
-        written = f.read()
+    with open(ENTRY_FILE, "rb") as handle:
+        written = handle.read()
     if written.decode("utf-8") != winner:
-        print("ENTRY INVALID: written file differs from winner", file=sys.stderr)
-        return 1
-    digest = hashlib.sha256(written).hexdigest()
-    if digest != EXPECTED_SHA256:
-        print(f"ENTRY INVALID: sha256 {digest} != pinned {EXPECTED_SHA256}",
-              file=sys.stderr)
-        return 1
-    print(f"wrote {OUTPUT_PATH}")
-    print(f"words: {word_count(winner)}  chars: {len(winner)}")
-    print(f"sha256: {digest} (matches pinned digest)")
-    return 0
+        print("ENTRY INVALID: file on disk differs from winner")
+        raise SystemExit(1)
+    digest = sha256(written).hexdigest()
+    if digest != EXPECTED_SHA256:  # the pinned digest guards the text
+        print(f"ENTRY INVALID: sha256 {digest} is not the pinned {EXPECTED_SHA256}")
+        raise SystemExit(1)
+    print(f"wrote {ENTRY_FILE}")
+    print(f"words: {_words_in(winner)}  chars: {len(winner)}")
+    print(f"sha256: {digest} (pinned digest matches)")
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == "__main__": _run()
